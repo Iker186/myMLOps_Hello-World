@@ -12,65 +12,39 @@ jobs:
     container: adsoft/aiops:latest
 
     steps:
-      - uses: actions/checkout@v2
+      # 1️⃣ Descargar el repositorio
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-      - name: hello-world
-        run: echo "hello world workflows …"
+      # 2️⃣ Entrenar el modelo
+      - name: Train TensorFlow model
+        run: python3 linear-model.py
 
-      - name: run model
-        run: python linear-model.py
-
-      - name: Install kubectl
-        run: |
-          mkdir -p $HOME/bin
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          mv kubectl $HOME/bin/
-          echo "$HOME/bin" >> $GITHUB_PATH
-
-      - name: docker login
+      # 3️⃣ Login a Docker Hub
+      - name: Docker login
         env:
           DOCKER_USER: ${{ secrets.DOCKER_USER }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
           docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
 
+      # 4️⃣ Crear contenedor base con TensorFlow Serving
       - name: Download and run the Docker base image
         run: docker run -d --name serving_base tensorflow/serving
 
-      - name: copy model to the Docker image
-        run: docker cp ${{ secrets.MODEL_NAME }} serving_base:/models/${{ secrets.MODEL_NAME }}
+      # 5️⃣ Copiar modelo entrenado al contenedor
+      - name: Copy model to the Docker image
+        run: docker cp linear-model serving_base:/models/linear-model
 
-      - name: update docker user in k8
-        run: sed -i 's/{docker_user}/${{ secrets.DOCKER_USER }}/g' manifests/linear_model_k8s.yaml
-
-      - name: update model name in k8
-        run: sed -i 's/{model_name}/${{ secrets.MODEL_NAME }}/g' manifests/linear_model_k8s.yaml
-
-      - name: update _ by -
-        run: sed -i 's/_/-/g' manifests/linear_model_k8s.yaml
-
-      - name: update sha in k8
-        run: sed -i 's/{github.sha}/${{ github.sha }}/g' manifests/linear_model_k8s.yaml
-
-      - name: list
-        run: cat manifests/linear_model_k8s.yaml
-
-      # ⬇️ NUEVO: configuramos acceso al cluster PWK
-      - name: Set up kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_CONTENT }}" > $HOME/.kube/config
-
-      - name: Verify cluster connection
-        run: kubectl get nodes
-
-      # 🚀 Desplegar manifiestos en PWK
-      - name: Deploy to Kubernetes
-        run: kubectl apply -f manifests/linear_model_k8s.yaml
-
+      # 6️⃣ Construir imagen personalizada
       - name: Build the custom Docker image
-        run: docker commit --change "ENV MODEL_NAME ${{ secrets.MODEL_NAME }}" serving_base ${{ secrets.DOCKER_USER }}/tensorflow-${{ secrets.MODEL_NAME }}:${{ github.sha }}
+        run: docker commit --change "ENV MODEL_NAME linear-model" serving_base ${{ secrets.DOCKER_USER }}/tensorflow-linear-model:${{ github.sha }}
 
+      # 7️⃣ Subir imagen a Docker Hub
       - name: Docker Push
-        run: docker push ${{ secrets.DOCKER_USER }}/tensorflow-${{ secrets.MODEL_NAME }}:${{ github.sha }}
+        run: docker push ${{ secrets.DOCKER_USER }}/tensorflow-linear-model:${{ github.sha }}
+
+      # 8️⃣ Desplegar en Render
+      - name: Deploy to Render
+        run: |
+          curl -X POST https://api.render.com/deploy/srv-XXXXXXXX?key=${{ secrets.RENDER_API_KEY }}
